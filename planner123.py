@@ -1,4 +1,5 @@
 import streamlit as st
+from supabase import create_client, Client
 from datetime import date
 
 # =========================================================
@@ -12,59 +13,173 @@ st.set_page_config(
 )
 
 # =========================================================
-# DATA
+# SUPABASE CONNECTION
 # =========================================================
 
-if "homework" not in st.session_state:
-    st.session_state.homework = []
+@st.cache_resource
+def get_supabase() -> Client:
+    return create_client(
+        st.secrets["SUPABASE_URL"],
+        st.secrets["SUPABASE_KEY"]
+    )
 
-if "exams" not in st.session_state:
-    st.session_state.exams = []
+
+supabase = get_supabase()
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 
 # =========================================================
-# SMART DATE FUNCTIONS
+# AUTHENTICATION
 # =========================================================
 
-def homework_status(due_date, completed):
-    today = date.today()
-    days = (due_date - today).days
+if st.session_state.user is None:
 
-    if completed:
-        return "✅ Completed", "success"
+    st.title("📚 StudyPlanner")
+    st.subheader("Welcome!")
 
-    if days < 0:
-        return f"🔴 OVERDUE by {abs(days)} day(s)", "error"
+    login_tab, signup_tab = st.tabs(
+        ["🔐 Log In", "👤 Create Account"]
+    )
 
-    if days == 0:
-        return "🔴 DUE TODAY", "error"
+    # =====================================================
+    # LOGIN
+    # =====================================================
 
-    if days == 1:
-        return "🟠 Due tomorrow", "warning"
+    with login_tab:
 
-    if days <= 3:
-        return f"🟡 Due in {days} days", "warning"
+        email = st.text_input(
+            "Email",
+            key="login_email"
+        )
 
-    return f"🟢 Due in {days} days", "success"
+        password = st.text_input(
+            "Password",
+            type="password",
+            key="login_password"
+        )
+
+        if st.button(
+            "🔐 Log In",
+            use_container_width=True
+        ):
+
+            if not email or not password:
+
+                st.error(
+                    "Please enter your email and password."
+                )
+
+            else:
+
+                try:
+
+                    response = supabase.auth.sign_in_with_password(
+                        {
+                            "email": email,
+                            "password": password
+                        }
+                    )
+
+                    st.session_state.user = response.user
+
+                    st.success(
+                        "Login successful! 🎉"
+                    )
+
+                    st.rerun()
+
+                except Exception as e:
+
+                    st.error(
+                        f"Login error: {e}"
+                    )
+
+    # =====================================================
+    # SIGN UP
+    # =====================================================
+
+    with signup_tab:
+
+        new_email = st.text_input(
+            "Email",
+            key="signup_email"
+        )
+
+        new_password = st.text_input(
+            "Password",
+            type="password",
+            key="signup_password"
+        )
+
+        confirm_password = st.text_input(
+            "Confirm password",
+            type="password",
+            key="signup_confirm"
+        )
+
+        if st.button(
+            "👤 Create Account",
+            use_container_width=True
+        ):
+
+            if not new_email or not new_password:
+
+                st.error(
+                    "Please fill in all fields."
+                )
+
+            elif new_password != confirm_password:
+
+                st.error(
+                    "Passwords do not match."
+                )
+
+            elif len(new_password) < 6:
+
+                st.error(
+                    "Password must contain at least 6 characters."
+                )
+
+            else:
+
+                try:
+
+                    response = supabase.auth.sign_up(
+                        {
+                            "email": new_email,
+                            "password": new_password
+                        }
+                    )
+
+                    st.success(
+                        "Account created! 🎉"
+                    )
+
+                    st.info(
+                        "Check your email if email confirmation "
+                        "is enabled."
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Signup error: {e}"
+                    )
+
+    st.stop()
 
 
-def exam_status(exam_date):
-    today = date.today()
-    days = (exam_date - today).days
+# =========================================================
+# CURRENT USER
+# =========================================================
 
-    if days < 0:
-        return f"✅ Exam passed {abs(days)} day(s) ago", "success"
-
-    if days == 0:
-        return "🔴 EXAM TODAY!", "error"
-
-    if days == 1:
-        return "🟠 EXAM TOMORROW!", "warning"
-
-    if days <= 3:
-        return f"🟡 Exam in {days} days", "warning"
-
-    return f"🟢 Exam in {days} days", "success"
+user = st.session_state.user
 
 
 # =========================================================
@@ -72,6 +187,10 @@ def exam_status(exam_date):
 # =========================================================
 
 st.sidebar.title("📚 StudyPlanner")
+
+st.sidebar.write(
+    f"👤 {user.email}"
+)
 
 page = st.sidebar.radio(
     "Navigate",
@@ -83,6 +202,100 @@ page = st.sidebar.radio(
     ]
 )
 
+if st.sidebar.button(
+    "🚪 Log Out",
+    use_container_width=True
+):
+
+    supabase.auth.sign_out()
+
+    st.session_state.user = None
+
+    st.rerun()
+
+
+# =========================================================
+# SMART DATE FUNCTIONS
+# =========================================================
+
+def homework_status(due_date, completed):
+
+    today = date.today()
+
+    if isinstance(due_date, str):
+        due_date = date.fromisoformat(due_date)
+
+    days = (due_date - today).days
+
+    if completed:
+        return "✅ Completed"
+
+    if days < 0:
+        return f"🔴 OVERDUE by {abs(days)} day(s)"
+
+    if days == 0:
+        return "🔴 DUE TODAY"
+
+    if days == 1:
+        return "🟠 Due tomorrow"
+
+    if days <= 3:
+        return f"🟡 Due in {days} days"
+
+    return f"🟢 Due in {days} days"
+
+
+def exam_status(exam_date):
+
+    today = date.today()
+
+    if isinstance(exam_date, str):
+        exam_date = date.fromisoformat(exam_date)
+
+    days = (exam_date - today).days
+
+    if days < 0:
+        return f"✅ Exam passed {abs(days)} day(s) ago"
+
+    if days == 0:
+        return "🔴 EXAM TODAY!"
+
+    if days == 1:
+        return "🟠 EXAM TOMORROW!"
+
+    if days <= 3:
+        return f"🟡 Exam in {days} days"
+
+    return f"🟢 Exam in {days} days"
+
+
+# =========================================================
+# GET USER DATA
+# =========================================================
+
+homework_response = (
+    supabase
+    .table("homework")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("due_date")
+    .execute()
+)
+
+homework = homework_response.data
+
+
+exams_response = (
+    supabase
+    .table("exams")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("exam_date")
+    .execute()
+)
+
+exams = exams_response.data
+
 
 # =========================================================
 # DASHBOARD
@@ -91,52 +304,62 @@ page = st.sidebar.radio(
 if page == "🏠 Dashboard":
 
     st.title("📚 StudyPlanner")
-    st.write("Your smart homework and exam planner.")
 
-    total_homework = len(st.session_state.homework)
+    st.write(
+        "Your personal homework and exam planner."
+    )
+
+    total_homework = len(homework)
 
     completed_homework = sum(
         1
-        for task in st.session_state.homework
+        for task in homework
         if task["completed"]
     )
 
-    remaining_homework = total_homework - completed_homework
+    remaining_homework = (
+        total_homework - completed_homework
+    )
 
-    total_exams = len(st.session_state.exams)
+    total_exams = len(exams)
 
     if total_homework > 0:
-        progress = int(
-            (completed_homework / total_homework) * 100
-        )
-    else:
-        progress = 0
 
-    # -----------------------------------------------------
-    # STATISTICS
-    # -----------------------------------------------------
+        progress = int(
+            completed_homework /
+            total_homework *
+            100
+        )
+
+    else:
+
+        progress = 0
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
+
         st.metric(
             "📝 Homework",
             total_homework
         )
 
     with col2:
+
         st.metric(
             "⏳ Remaining",
             remaining_homework
         )
 
     with col3:
+
         st.metric(
             "📅 Exams",
             total_exams
         )
 
     with col4:
+
         st.metric(
             "📊 Progress",
             f"{progress}%"
@@ -144,29 +367,27 @@ if page == "🏠 Dashboard":
 
     st.divider()
 
-    # -----------------------------------------------------
-    # NEEDS ATTENTION
-    # -----------------------------------------------------
-
     st.header("⚠️ Needs Attention")
 
-    attention_found = False
+    attention = False
 
-    # Homework alerts
-
-    for task in st.session_state.homework:
+    for task in homework:
 
         if task["completed"]:
             continue
 
-        status, status_type = homework_status(
-            task["due"],
+        status = homework_status(
+            task["due_date"],
             task["completed"]
         )
 
-        if status_type in ["error", "warning"]:
+        if (
+            "OVERDUE" in status
+            or "TODAY" in status
+            or "tomorrow" in status
+        ):
 
-            attention_found = True
+            attention = True
 
             st.warning(
                 f"📝 **{task['subject']}** — "
@@ -174,165 +395,33 @@ if page == "🏠 Dashboard":
                 f"{status}"
             )
 
-    # Exam alerts
+    for exam in exams:
 
-    for exam in st.session_state.exams:
-
-        status, status_type = exam_status(
-            exam["date"]
+        status = exam_status(
+            exam["exam_date"]
         )
 
-        if status_type in ["error", "warning"]:
+        if (
+            "TODAY" in status
+            or "TOMORROW" in status
+        ):
 
-            # Don't treat passed exams as urgent
-            if "passed" not in status:
+            attention = True
 
-                attention_found = True
+            st.warning(
+                f"📅 **{exam['subject']}** — "
+                f"{status}"
+            )
 
-                st.warning(
-                    f"📅 **{exam['subject']}** — "
-                    f"{status}"
-                )
-
-    if not attention_found:
+    if not attention:
 
         st.success(
-            "🎉 Nothing urgent! You're all caught up."
+            "🎉 Nothing urgent!"
         )
-
-    st.divider()
-
-    # -----------------------------------------------------
-    # HOMEWORK
-    # -----------------------------------------------------
-
-    st.header("📝 Homework")
-
-    if not st.session_state.homework:
-
-        st.info("No homework added yet.")
-
-    else:
-
-        for i, task in enumerate(
-            st.session_state.homework
-        ):
-
-            with st.container(border=True):
-
-                col1, col2, col3 = st.columns(
-                    [4, 3, 1]
-                )
-
-                with col1:
-
-                    if task["completed"]:
-
-                        st.markdown(
-                            f"~~**{task['subject']} — "
-                            f"{task['name']}**~~"
-                        )
-
-                    else:
-
-                        st.write(
-                            f"**{task['subject']} — "
-                            f"{task['name']}**"
-                        )
-
-                with col2:
-
-                    status, status_type = homework_status(
-                        task["due"],
-                        task["completed"]
-                    )
-
-                    st.write(f"📅 {task['due']}")
-                    st.write(status)
-                    st.write(
-                        f"🔥 {task['priority']} priority"
-                    )
-
-                with col3:
-
-                    if not task["completed"]:
-
-                        if st.button(
-                            "✅",
-                            key=f"dash_complete_{i}"
-                        ):
-
-                            task["completed"] = True
-                            st.rerun()
-
-                    if st.button(
-                        "🗑️",
-                        key=f"dash_delete_{i}"
-                    ):
-
-                        st.session_state.homework.pop(i)
-                        st.rerun()
-
-    st.divider()
-
-    # -----------------------------------------------------
-    # EXAMS
-    # -----------------------------------------------------
-
-    st.header("📅 Exams")
-
-    if not st.session_state.exams:
-
-        st.info("No exams added yet.")
-
-    else:
-
-        for i, exam in enumerate(
-            st.session_state.exams
-        ):
-
-            with st.container(border=True):
-
-                col1, col2, col3 = st.columns(
-                    [3, 4, 1]
-                )
-
-                with col1:
-
-                    st.write(
-                        f"### 📚 {exam['subject']}"
-                    )
-
-                with col2:
-
-                    status, status_type = exam_status(
-                        exam["date"]
-                    )
-
-                    st.write(
-                        f"📅 **{exam['date']}**"
-                    )
-
-                    st.write(status)
-
-                    if exam["topics"]:
-                        st.write(
-                            f"📖 Topics: {exam['topics']}"
-                        )
-
-                with col3:
-
-                    if st.button(
-                        "🗑️",
-                        key=f"dash_exam_delete_{i}"
-                    ):
-
-                        st.session_state.exams.pop(i)
-                        st.rerun()
 
 
 # =========================================================
-# HOMEWORK PAGE
+# HOMEWORK
 # =========================================================
 
 elif page == "📝 Homework":
@@ -344,13 +433,11 @@ elif page == "📝 Homework":
     with st.form("homework_form"):
 
         subject = st.text_input(
-            "Subject",
-            placeholder="Mathematics"
+            "Subject"
         )
 
-        homework_name = st.text_input(
-            "Homework",
-            placeholder="Complete Chapter 5"
+        name = st.text_input(
+            "Homework"
         )
 
         due_date = st.date_input(
@@ -367,55 +454,66 @@ elif page == "📝 Homework":
             ]
         )
 
-        add_homework = st.form_submit_button(
+        submit = st.form_submit_button(
             "➕ Add Homework"
         )
 
-        if add_homework:
+        if submit:
 
             if not subject.strip():
 
                 st.error(
-                    "Please enter a subject."
+                    "Enter a subject."
                 )
 
-            elif not homework_name.strip():
+            elif not name.strip():
 
                 st.error(
-                    "Please enter the homework."
+                    "Enter the homework."
                 )
 
             else:
 
-                st.session_state.homework.append(
-                    {
-                        "subject": subject,
-                        "name": homework_name,
-                        "due": due_date,
-                        "priority": priority,
-                        "completed": False
-                    }
-                )
+                try:
 
-                st.success(
-                    "Homework added! 🎉"
-                )
+                    supabase.table(
+                        "homework"
+                    ).insert(
+                        {
+                            "user_id": user.id,
+                            "subject": subject,
+                            "name": name,
+                            "due_date": str(due_date),
+                            "priority": priority,
+                            "completed": False
+                        }
+                    ).execute()
+
+                    st.success(
+                        "Homework saved! 💾"
+                    )
+
+                    st.rerun()
+
+                except Exception as e:
+
+                    st.error(
+                        f"Could not save homework: {e}"
+                    )
 
     st.divider()
 
     st.subheader("📋 Your Homework")
 
-    if not st.session_state.homework:
+    if not homework:
 
         st.info(
-            "You haven't added any homework yet."
+            "No homework yet."
         )
 
     else:
 
-        for i, task in enumerate(
-            st.session_state.homework
-        ):
+        for task in homework:
 
             with st.container(border=True):
 
@@ -441,16 +539,16 @@ elif page == "📝 Homework":
 
                 with col2:
 
-                    status, status_type = homework_status(
-                        task["due"],
-                        task["completed"]
+                    st.write(
+                        f"📅 {task['due_date']}"
                     )
 
                     st.write(
-                        f"📅 Due: {task['due']}"
+                        homework_status(
+                            task["due_date"],
+                            task["completed"]
+                        )
                     )
-
-                    st.write(status)
 
                     st.write(
                         f"🔥 {task['priority']} priority"
@@ -462,23 +560,61 @@ elif page == "📝 Homework":
 
                         if st.button(
                             "✅",
-                            key=f"home_complete_{i}"
+                            key=f"complete_{task['id']}"
                         ):
 
-                            task["completed"] = True
-                            st.rerun()
+                            try:
+
+                                supabase.table(
+                                    "homework"
+                                ).update(
+                                    {
+                                        "completed": True
+                                    }
+                                ).eq(
+                                    "id",
+                                    task["id"]
+                                ).eq(
+                                    "user_id",
+                                    user.id
+                                ).execute()
+
+                                st.rerun()
+
+                            except Exception as e:
+
+                                st.error(
+                                    f"Could not update: {e}"
+                                )
 
                     if st.button(
                         "🗑️",
-                        key=f"home_delete_{i}"
+                        key=f"delete_{task['id']}"
                     ):
 
-                        st.session_state.homework.pop(i)
-                        st.rerun()
+                        try:
+
+                            supabase.table(
+                                "homework"
+                            ).delete().eq(
+                                "id",
+                                task["id"]
+                            ).eq(
+                                "user_id",
+                                user.id
+                            ).execute()
+
+                            st.rerun()
+
+                        except Exception as e:
+
+                            st.error(
+                                f"Could not delete: {e}"
+                            )
 
 
 # =========================================================
-# EXAMS PAGE
+# EXAMS
 # =========================================================
 
 elif page == "📅 Exams":
@@ -490,8 +626,7 @@ elif page == "📅 Exams":
     with st.form("exam_form"):
 
         subject = st.text_input(
-            "Subject",
-            placeholder="Science"
+            "Subject"
         )
 
         exam_date = st.date_input(
@@ -500,53 +635,61 @@ elif page == "📅 Exams":
         )
 
         topics = st.text_area(
-            "Topics",
-            placeholder=(
-                "Cells, Genetics, Human Body"
-            )
+            "Topics"
         )
 
-        add_exam = st.form_submit_button(
+        submit = st.form_submit_button(
             "➕ Add Exam"
         )
 
-        if add_exam:
+        if submit:
 
             if not subject.strip():
 
                 st.error(
-                    "Please enter the subject."
+                    "Enter a subject."
                 )
 
             else:
 
-                st.session_state.exams.append(
-                    {
-                        "subject": subject,
-                        "date": exam_date,
-                        "topics": topics
-                    }
-                )
+                try:
 
-                st.success(
-                    "Exam added! 📚"
-                )
+                    supabase.table(
+                        "exams"
+                    ).insert(
+                        {
+                            "user_id": user.id,
+                            "subject": subject,
+                            "exam_date": str(exam_date),
+                            "topics": topics
+                        }
+                    ).execute()
+
+                    st.success(
+                        "Exam saved! 💾"
+                    )
+
+                    st.rerun()
+
+                except Exception as e:
+
+                    st.error(
+                        f"Could not save exam: {e}"
+                    )
 
     st.divider()
 
     st.subheader("📋 Your Exams")
 
-    if not st.session_state.exams:
+    if not exams:
 
         st.info(
-            "You haven't added any exams yet."
+            "No exams yet."
         )
 
     else:
 
-        for i, exam in enumerate(
-            st.session_state.exams
-        ):
+        for exam in exams:
 
             with st.container(border=True):
 
@@ -562,15 +705,15 @@ elif page == "📅 Exams":
 
                 with col2:
 
-                    status, status_type = exam_status(
-                        exam["date"]
+                    st.write(
+                        f"📅 {exam['exam_date']}"
                     )
 
                     st.write(
-                        f"📅 {exam['date']}"
+                        exam_status(
+                            exam["exam_date"]
+                        )
                     )
-
-                    st.write(status)
 
                     if exam["topics"]:
 
@@ -582,34 +725,49 @@ elif page == "📅 Exams":
 
                     if st.button(
                         "🗑️",
-                        key=f"exam_delete_{i}"
+                        key=f"delete_exam_{exam['id']}"
                     ):
 
-                        st.session_state.exams.pop(i)
-                        st.rerun()
+                        try:
+
+                            supabase.table(
+                                "exams"
+                            ).delete().eq(
+                                "id",
+                                exam["id"]
+                            ).eq(
+                                "user_id",
+                                user.id
+                            ).execute()
+
+                            st.rerun()
+
+                        except Exception as e:
+
+                            st.error(
+                                f"Could not delete exam: {e}"
+                            )
 
 
 # =========================================================
-# PROGRESS PAGE
+# PROGRESS
 # =========================================================
 
 elif page == "📊 Progress":
 
     st.title("📊 Your Progress")
 
-    total = len(
-        st.session_state.homework
-    )
+    total = len(homework)
 
     completed = sum(
         1
-        for task in st.session_state.homework
+        for task in homework
         if task["completed"]
     )
 
     remaining = total - completed
 
-    if total > 0:
+    if total:
 
         percentage = completed / total
 
@@ -617,7 +775,9 @@ elif page == "📊 Progress":
 
         percentage = 0
 
-    st.subheader("Homework Progress")
+    st.subheader(
+        "Homework Progress"
+    )
 
     st.progress(
         percentage
@@ -653,28 +813,23 @@ elif page == "📊 Progress":
 
     st.divider()
 
-    st.subheader("📅 Exams")
+    st.subheader(
+        "📅 Exams"
+    )
 
     st.metric(
         "Total Exams",
-        len(st.session_state.exams)
+        len(exams)
     )
 
-    if total > 0 and completed == total:
+    if total and completed == total:
 
         st.success(
             "🎉 You completed all your homework!"
         )
 
-    elif total > 0:
+    elif total:
 
         st.info(
-            "💪 Keep going! You're making progress."
-        )
-
-    else:
-
-        st.info(
-            "Add some homework to start tracking "
-            "your progress."
+            "💪 Keep going!"
         )
